@@ -172,10 +172,195 @@ export class Game extends Component {
         this.selectedTile = tile2;
         this.exchangeTile = tile1;
 
-        // TODO: 检查是否有可消除的组合
-        // TODO: 如果没有可消除的组合，则交换回来
+        // 检查是否有可消除的组合
+        const matches = this.findMatches();
+        if (matches.length > 0) {
+            // 有可消除的组合
+            await this.eliminateMatches(matches);
+            await this.dropTiles();
+            await this.fillEmptySpaces();
+        } else {
+            // 没有可消除的组合，交换回来
+            const tempType = this.board[row1][col1];
+            this.board[row1][col1] = this.board[row2][col2];
+            this.board[row2][col2] = tempType;
+            tile1.init(this.board[row1][col1], row1, col1);
+            tile2.init(this.board[row2][col2], row2, col2);
+        }
 
         this.isSwapping = false;
+    }
+
+    private findMatches(): { row: number, col: number }[] {
+        const matches: { row: number, col: number }[] = [];
+        const rowsToCheck = new Set<number>();
+        const colsToCheck = new Set<number>();
+
+        // 只检查交换的元素所在的行和列
+        if (this.selectedTile && this.exchangeTile) {
+            rowsToCheck.add(this.selectedTile.row);
+            rowsToCheck.add(this.exchangeTile.row);
+            colsToCheck.add(this.selectedTile.col);
+            colsToCheck.add(this.exchangeTile.col);
+        }
+
+        // 检查指定行的水平匹配
+        for (const row of rowsToCheck) {
+            let count = 1;
+            for (let col = 1; col < this.columns; col++) {
+                if (this.board[row][col] === this.board[row][col - 1]) {
+                    count++;
+                } else {
+                    if (count >= 3) {
+                        for (let i = 0; i < count; i++) {
+                            matches.push({ row, col: col - 1 - i });
+                        }
+                    }
+                    count = 1;
+                }
+            }
+            if (count >= 3) {
+                for (let i = 0; i < count; i++) {
+                    matches.push({ row, col: this.columns - 1 - i });
+                }
+            }
+        }
+
+        // 检查指定列的垂直匹配
+        for (const col of colsToCheck) {
+            let count = 1;
+            for (let row = 1; row < this.rows; row++) {
+                if (this.board[row][col] === this.board[row - 1][col]) {
+                    count++;
+                } else {
+                    if (count >= 3) {
+                        for (let i = 0; i < count; i++) {
+                            matches.push({ row: row - 1 - i, col });
+                        }
+                    }
+                    count = 1;
+                }
+            }
+            if (count >= 3) {
+                for (let i = 0; i < count; i++) {
+                    matches.push({ row: this.rows - 1 - i, col });
+                }
+            }
+        }
+
+        return matches;
+    }
+
+    private async fillEmptySpaces() {
+        for (let col = 0; col < this.columns; col++) {
+            for (let row = 0; row < this.rows; row++) {
+                if (this.board[row][col] === -1) {
+                    this.board[row][col] = Math.floor(Math.random() * this.tileTypes);
+                    this.tileNodes[row][col].active = true;
+                    this.tileNodes[row][col].getComponent(Tile).init(this.board[row][col], row, col);
+                }
+            }
+        }
+        
+        // 在填充新元素后，仍然需要检查整个棋盘的匹配
+        const newMatches = this.findMatchesForEntireBoard();
+        if (newMatches.length > 0) {
+            await this.eliminateMatches(newMatches);
+            await this.dropTiles();
+            await this.fillEmptySpaces();
+        }
+    }
+
+    private findMatchesForEntireBoard(): { row: number, col: number }[] {
+        const matches: { row: number, col: number }[] = [];
+        
+        // 检查水平匹配
+        for (let row = 0; row < this.rows; row++) {
+            let count = 1;
+            for (let col = 1; col < this.columns; col++) {
+                if (this.board[row][col] === this.board[row][col - 1]) {
+                    count++;
+                } else {
+                    if (count >= 3) {
+                        for (let i = 0; i < count; i++) {
+                            matches.push({ row, col: col - 1 - i });
+                        }
+                    }
+                    count = 1;
+                }
+            }
+            if (count >= 3) {
+                for (let i = 0; i < count; i++) {
+                    matches.push({ row, col: this.columns - 1 - i });
+                }
+            }
+        }
+
+        // 检查垂直匹配
+        for (let col = 0; col < this.columns; col++) {
+            let count = 1;
+            for (let row = 1; row < this.rows; row++) {
+                if (this.board[row][col] === this.board[row - 1][col]) {
+                    count++;
+                } else {
+                    if (count >= 3) {
+                        for (let i = 0; i < count; i++) {
+                            matches.push({ row: row - 1 - i, col });
+                        }
+                    }
+                    count = 1;
+                }
+            }
+            if (count >= 3) {
+                for (let i = 0; i < count; i++) {
+                    matches.push({ row: this.rows - 1 - i, col });
+                }
+            }
+        }
+
+        return matches;
+    }
+    private async eliminateMatches(matches: { row: number, col: number }[]) {
+        // 将匹配的位置标记为-1
+        for (const match of matches) {
+            this.board[match.row][match.col] = -1;
+            // 可以在这里添加消除动画效果
+            this.tileNodes[match.row][match.col].active = false;
+        }
+        
+        // 等待动画完成
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    private async dropTiles() {
+        let dropped = false;
+        do {
+            dropped = false;
+            for (let col = 0; col < this.columns; col++) {
+                // 处理顶部行的特殊情况
+                if (this.board[0][col] === -1) {
+                    this.board[0][col] = Math.floor(Math.random() * this.tileTypes);
+                    this.tileNodes[0][col].active = true;
+                    this.tileNodes[0][col].getComponent(Tile).init(this.board[0][col], 0, col);
+                    dropped = true;
+                }
+
+                // 处理其他行的下落
+                for (let row = this.rows - 1; row > 0; row--) {
+                    if (this.board[row][col] === -1) {
+                        this.board[row][col] = this.board[row - 1][col];
+                        this.board[row - 1][col] = -1;
+                        
+                        this.tileNodes[row][col].active = true;
+                        this.tileNodes[row][col].getComponent(Tile).init(this.board[row][col], row, col);
+                        this.tileNodes[row - 1][col].active = false;
+                        
+                        dropped = true;
+                    }
+                }
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        } while (dropped);
     }
 }
 
