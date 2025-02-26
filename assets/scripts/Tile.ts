@@ -15,8 +15,13 @@ export class Tile extends Component {
     private _sprite: Sprite = null;
 
     get type() { return this._type; }
+    set type(val: number) { this._type = val };
+
     get row() { return this._row; }
+    set row(val: number) { this._row = val };
+
     get col() { return this._col; }
+    set col(val: number) { this._col = val };
 
     onLoad() {
         this._sprite = this.getComponentInChildren(Sprite);

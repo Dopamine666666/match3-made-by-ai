@@ -23,10 +23,9 @@ export class Game extends Component {
     public tilePrefab: Prefab = null;
 
     @property({ tooltip: "元素种类数量", min: 3, max: 8 })
-    public tileTypes: number = 5;
 
-    private board: number[][] = [];
-    private tileNodes: Node[][] = [];
+    public tileTypes: number = 5;
+    private tileNodes: Tile[][] = [];
     private tileSize: number = 0;
     private selectedTile: Tile = null;
     private exchangeTile: Tile = null;
@@ -41,9 +40,8 @@ export class Game extends Component {
         this.tileSize = tileNode.getComponent(UITransform).width;
         tileNode.destroy();
 
-        this.initializeBoard();
-        this.createTileNodes();
-        this.setupTouchEvents();  // 移到这里
+        this.initGame();
+        this.setupTouchEvents();
     }
 
     onDestroy() {
@@ -54,10 +52,11 @@ export class Game extends Component {
         this.tileLayer.off(Node.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
     }
 
-    private createTileNodes() {
+    private initGame() {
         for (let i = 0; i < this.rows; i++) {
             this.tileNodes[i] = [];
             for (let j = 0; j < this.columns; j++) {
+                const type = Math.floor(Math.random() * this.tileTypes);
                 const node = instantiate(this.tilePrefab);
                 node.parent = this.tileLayer;
                 // 修改 y 坐标的计算，使其与行号相反
@@ -66,22 +65,8 @@ export class Game extends Component {
                     ((this.rows - i - 1) - this.rows/2 + 0.5) * this.tileSize,
                     0
                 );
-                this.tileNodes[i][j] = node;
-                node.getComponent(Tile).init(this.board[i][j], i, j);
-            }
-        }
-    }
-
-    private updateTileDisplay(row: number, col: number) {
-        const tileType = this.board[row][col];
-        this.tileNodes[row][col].getComponent(Tile).updateType(tileType);
-    }
-
-    private initializeBoard() {
-        for (let i = 0; i < this.rows; i++) {
-            this.board[i] = [];
-            for (let j = 0; j < this.columns; j++) {
-                this.board[i][j] = Math.floor(Math.random() * this.tileTypes);
+                this.tileNodes[i].push(node.getComponent(Tile));
+                node.getComponent(Tile).init(type, i, j);
             }
         }
     }
@@ -149,21 +134,6 @@ export class Game extends Component {
     private async swapTiles(tile1: Tile, tile2: Tile) {
         this.isSwapping = true;
 
-        // 保存原始位置
-        const row1 = tile1.row;
-        const col1 = tile1.col;
-        const row2 = tile2.row;
-        const col2 = tile2.col;
-
-        // 交换数据层
-        const tempType = this.board[row1][col1];
-        this.board[row1][col1] = this.board[row2][col2];
-        this.board[row2][col2] = tempType;
-
-        // 更新位置信息
-        tile1.init(this.board[row1][col1], row1, col1);
-        tile2.init(this.board[row2][col2], row2, col2);
-
         // 更新选中的tile为当前触点位置的tile
         this.selectedTile = tile2;
         this.exchangeTile = tile1;
@@ -172,16 +142,16 @@ export class Game extends Component {
         const matches = this.findMatches();
         if (matches.length > 0) {
             // 有可消除的组合
-            await this.eliminateMatches(matches);
-            await this.dropTiles();
-            await this.fillEmptySpaces();
+            const { type, row, col } = tile1;
+            tile1.init(tile2.type, tile2.row, tile2.col);
+            tile2.init(type, row, col);
+
+            // await this.eliminateMatches(matches);
+            // await this.dropTiles();
+            // await this.fillEmptySpaces();
         } else {
             // 没有可消除的组合，交换回来
-            const tempType = this.board[row1][col1];
-            this.board[row1][col1] = this.board[row2][col2];
-            this.board[row2][col2] = tempType;
-            tile1.init(this.board[row1][col1], row1, col1);
-            tile2.init(this.board[row2][col2], row2, col2);
+
         }
 
         this.isSwapping = false;
@@ -202,162 +172,171 @@ export class Game extends Component {
 
         // 检查指定行的水平匹配
         for (const row of rowsToCheck) {
-            let count = 1;
-            for (let col = 1; col < this.columns; col++) {
-                if (this.board[row][col] === this.board[row][col - 1]) {
-                    count++;
-                } else {
-                    if (count >= 3) {
-                        for (let i = 0; i < count; i++) {
-                            matches.push({ row, col: col - 1 - i });
-                        }
-                    }
-                    count = 1;
-                }
+            // 获取交换tile所在的列
+            const swapCols = Array.from(colsToCheck);
+            // 向左检查
+            let leftCount = 0;
+            let col = Math.min(...swapCols);
+            while (col > 0 && this.tileNodes[row][col - 1].type === this.tileNodes[row][col].type) {
+                leftCount++;
+                col--;
             }
-            if (count >= 3) {
-                for (let i = 0; i < count; i++) {
-                    matches.push({ row, col: this.columns - 1 - i });
+            // 向右检查
+            let rightCount = 0;
+            col = Math.max(...swapCols);
+            while (col < this.columns - 1 && this.tileNodes[row][col + 1].type === this.tileNodes[row][col].type) {
+                rightCount++;
+                col++;
+            }
+            // 如果包含交换的tile的连续数量大于等于3，则添加到匹配列表
+            const totalCount = leftCount + rightCount + 1;
+            if (totalCount >= 3) {
+                const startCol = Math.min(...swapCols) - leftCount;
+                for (let i = 0; i < totalCount; i++) {
+                    matches.push({ row, col: startCol + i });
                 }
             }
         }
 
         // 检查指定列的垂直匹配
         for (const col of colsToCheck) {
-            let count = 1;
-            for (let row = 1; row < this.rows; row++) {
-                if (this.board[row][col] === this.board[row - 1][col]) {
-                    count++;
-                } else {
-                    if (count >= 3) {
-                        for (let i = 0; i < count; i++) {
-                            matches.push({ row: row - 1 - i, col });
-                        }
-                    }
-                    count = 1;
-                }
+            // 获取交换tile所在的行
+            const swapRows = Array.from(rowsToCheck);
+            // 向上检查
+            let upCount = 0;
+            let row = Math.min(...swapRows);
+            while (row > 0 && this.tileNodes[row - 1][col].type === this.tileNodes[row][col].type) {
+                upCount++;
+                row--;
             }
-            if (count >= 3) {
-                for (let i = 0; i < count; i++) {
-                    matches.push({ row: this.rows - 1 - i, col });
+            // 向下检查
+            let downCount = 0;
+            row = Math.max(...swapRows);
+            while (row < this.rows - 1 && this.tileNodes[row + 1][col].type === this.tileNodes[row][col].type) {
+                downCount++;
+                row++;
+            }
+            // 如果包含交换的tile的连续数量大于等于3，则添加到匹配列表
+            const totalCount = upCount + downCount + 1;
+            if (totalCount >= 3) {
+                const startRow = Math.min(...swapRows) - upCount;
+                for (let i = 0; i < totalCount; i++) {
+                    matches.push({ row: startRow + i, col });
                 }
             }
         }
-
         return matches;
     }
 
-    private async fillEmptySpaces() {
-        for (let col = 0; col < this.columns; col++) {
-            for (let row = 0; row < this.rows; row++) {
-                if (this.board[row][col] === -1) {
-                    this.board[row][col] = Math.floor(Math.random() * this.tileTypes);
-                    this.tileNodes[row][col].active = true;
-                    this.tileNodes[row][col].getComponent(Tile).init(this.board[row][col], row, col);
-                }
-            }
-        }
+    // private async fillEmptySpaces() {
+    //     for (let col = 0; col < this.columns; col++) {
+    //         for (let row = 0; row < this.rows; row++) {
+    //             if (this.tileNodes[row][col].type === -1) {
+    //                 this.tileNodes[row][col].init(Math.floor(Math.random() * this.tileTypes), row, col);
+    //                 this.tileNodes[row][col].node.active = true;
+    //             }
+    //         }
+    //     }
         
-        // 在填充新元素后，仍然需要检查整个棋盘的匹配
-        const newMatches = this.findMatchesForEntireBoard();
-        if (newMatches.length > 0) {
-            await this.eliminateMatches(newMatches);
-            await this.dropTiles();
-            await this.fillEmptySpaces();
-        }
-    }
+    //     // 在填充新元素后，仍然需要检查整个棋盘的匹配
+    //     const newMatches = this.findMatchesForEntireBoard();
+    //     if (newMatches.length > 0) {
+    //         await this.eliminateMatches(newMatches);
+    //         await this.dropTiles();
+    //         await this.fillEmptySpaces();
+    //     }
+    // }
 
-    private findMatchesForEntireBoard(): { row: number, col: number }[] {
-        const matches: { row: number, col: number }[] = [];
+    // private findMatchesForEntireBoard(): { row: number, col: number }[] {
+    //     const matches: { row: number, col: number }[] = [];
         
-        // 检查水平匹配
-        for (let row = 0; row < this.rows; row++) {
-            let count = 1;
-            for (let col = 1; col < this.columns; col++) {
-                if (this.board[row][col] === this.board[row][col - 1]) {
-                    count++;
-                } else {
-                    if (count >= 3) {
-                        for (let i = 0; i < count; i++) {
-                            matches.push({ row, col: col - 1 - i });
-                        }
-                    }
-                    count = 1;
-                }
-            }
-            if (count >= 3) {
-                for (let i = 0; i < count; i++) {
-                    matches.push({ row, col: this.columns - 1 - i });
-                }
-            }
-        }
+    //     // 检查水平匹配
+    //     for (let row = 0; row < this.rows; row++) {
+    //         let count = 1;
+    //         for (let col = 1; col < this.columns; col++) {
+    //             if (this.tileNodes[row][col].type === this.tileNodes[row][col - 1].type) {
+    //                 count++;
+    //             } else {
+    //                 if (count >= 3) {
+    //                     for (let i = 0; i < count; i++) {
+    //                         matches.push({ row, col: col - 1 - i });
+    //                     }
+    //                 }
+    //                 count = 1;
+    //             }
+    //         }
+    //         if (count >= 3) {
+    //             for (let i = 0; i < count; i++) {
+    //                 matches.push({ row, col: this.columns - 1 - i });
+    //             }
+    //         }
+    //     }
 
-        // 检查垂直匹配
-        for (let col = 0; col < this.columns; col++) {
-            let count = 1;
-            for (let row = 1; row < this.rows; row++) {
-                if (this.board[row][col] === this.board[row - 1][col]) {
-                    count++;
-                } else {
-                    if (count >= 3) {
-                        for (let i = 0; i < count; i++) {
-                            matches.push({ row: row - 1 - i, col });
-                        }
-                    }
-                    count = 1;
-                }
-            }
-            if (count >= 3) {
-                for (let i = 0; i < count; i++) {
-                    matches.push({ row: this.rows - 1 - i, col });
-                }
-            }
-        }
+    //     // 检查垂直匹配
+    //     for (let col = 0; col < this.columns; col++) {
+    //         let count = 1;
+    //         for (let row = 1; row < this.rows; row++) {
+    //             if (this.tileNodes[row][col].type === this.tileNodes[row - 1][col].type) {
+    //                 count++;
+    //             } else {
+    //                 if (count >= 3) {
+    //                     for (let i = 0; i < count; i++) {
+    //                         matches.push({ row: row - 1 - i, col });
+    //                     }
+    //                 }
+    //                 count = 1;
+    //             }
+    //         }
+    //         if (count >= 3) {
+    //             for (let i = 0; i < count; i++) {
+    //                 matches.push({ row: this.rows - 1 - i, col });
+    //             }
+    //         }
+    //     }
 
-        return matches;
-    }
-    private async eliminateMatches(matches: { row: number, col: number }[]) {
-        // 将匹配的位置标记为-1
-        for (const match of matches) {
-            this.board[match.row][match.col] = -1;
-            // 可以在这里添加消除动画效果
-            this.tileNodes[match.row][match.col].active = false;
-        }
+    //     return matches;
+    // }
+    // private async eliminateMatches(matches: { row: number, col: number }[]) {
+    //     // 将匹配的位置标记为-1
+    //     for (const match of matches) {
+    //         this.tileNodes[match.row][match.col].type = -1;
+    //         // 可以在这里添加消除动画效果
+    //         this.tileNodes[match.row][match.col].node.active = false;
+    //     }
         
-        // 等待动画完成
-        await new Promise(resolve => setTimeout(resolve, 200));
-    }
+    //     // 等待动画完成
+    //     await new Promise(resolve => setTimeout(resolve, 200));
+    // }
 
-    private async dropTiles() {
-        let dropped = false;
-        do {
-            dropped = false;
-            for (let col = 0; col < this.columns; col++) {
-                // 处理顶部行的特殊情况
-                if (this.board[0][col] === -1) {
-                    this.board[0][col] = Math.floor(Math.random() * this.tileTypes);
-                    this.tileNodes[0][col].active = true;
-                    this.tileNodes[0][col].getComponent(Tile).init(this.board[0][col], 0, col);
-                    dropped = true;
-                }
+    // private async dropTiles() {
+    //     let dropped = false;
+    //     do {
+    //         dropped = false;
+    //         for (let col = 0; col < this.columns; col++) {
+    //             // 处理顶部行的特殊情况
+    //             if (this.tileNodes[0][col].type === -1) {
+    //                 this.tileNodes[0][col].init(Math.floor(Math.random() * this.tileTypes), 0, col);
+    //                 this.tileNodes[0][col].node.active = true;
+    //                 dropped = true;
+    //             }
 
-                // 处理其他行的下落
-                for (let row = this.rows - 1; row > 0; row--) {
-                    if (this.board[row][col] === -1) {
-                        this.board[row][col] = this.board[row - 1][col];
-                        this.board[row - 1][col] = -1;
+    //             // 处理其他行的下落
+    //             for (let row = this.rows - 1; row > 0; row--) {
+    //                 const tile = this.tileNodes[row][col];
+    //                 if (tile.type === -1) {
+    //                     tile.init(this.tileNodes[row - 1][col].type, row, col);
+    //                     this.tileNodes[row - 1][col].type = -1;
                         
-                        this.tileNodes[row][col].active = true;
-                        this.tileNodes[row][col].getComponent(Tile).init(this.board[row][col], row, col);
-                        this.tileNodes[row - 1][col].active = false;
+    //                     tile.node.active = true;
+    //                     this.tileNodes[row - 1][col].node.active = false;
                         
-                        dropped = true;
-                    }
-                }
-            }
-            await new Promise(resolve => setTimeout(resolve, 100));
-        } while (dropped);
-    }
+    //                     dropped = true;
+    //                 }
+    //             }
+    //         }
+    //         await new Promise(resolve => setTimeout(resolve, 100));
+    //     } while (dropped);
+    // }
 }
 
 
