@@ -86,10 +86,6 @@ export class Game extends Component {
         }
     }
 
-    update(deltaTime: number) {
-        this.setupTouchEvents();
-    }
-
     private setupTouchEvents() {
         this.tileLayer.on(Node.EventType.TOUCH_START, this.onTouchStart, this);
         this.tileLayer.on(Node.EventType.TOUCH_MOVE, this.onTouchMove, this);
