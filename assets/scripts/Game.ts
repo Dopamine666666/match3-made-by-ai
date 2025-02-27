@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Prefab, UITransform, instantiate, Vec2, EventTouch, Vec3 } from 'cc';
+import { _decorator, Component, Node, Prefab, UITransform, instantiate, Vec2, EventTouch, Vec3, color } from 'cc';
 import { Tile } from './Tile';
 const { ccclass, property } = _decorator;
 
@@ -25,6 +25,7 @@ export class Game extends Component {
     @property({ tooltip: "元素种类数量", min: 3, max: 8 })
 
     public tileTypes: number = 5;
+    private board: number[][] = [];
     private tileNodes: Tile[][] = [];
     private tileSize: number = 0;
     private selectedTile: Tile = null;
@@ -54,6 +55,7 @@ export class Game extends Component {
 
     private initGame() {
         for (let i = 0; i < this.rows; i++) {
+            this.board[i] = [];
             this.tileNodes[i] = [];
             for (let j = 0; j < this.columns; j++) {
                 const type = Math.floor(Math.random() * this.tileTypes);
@@ -65,6 +67,7 @@ export class Game extends Component {
                     ((this.rows - i - 1) - this.rows/2 + 0.5) * this.tileSize,
                     0
                 );
+                this.board[i].push(type);
                 this.tileNodes[i].push(node.getComponent(Tile));
                 node.getComponent(Tile).init(type, i, j);
             }
@@ -83,7 +86,7 @@ export class Game extends Component {
         
         this.touchStartPos = event.getUILocation();
         const tile = this.getTileAtPosition(this.touchStartPos);
-        if (tile) {
+        if (tile && tile.type != -1) {
             this.selectedTile = tile;
             this.exchangeTile = null;
         }
@@ -99,7 +102,7 @@ export class Game extends Component {
         if (Vec2.distance(touchPos, this.touchStartPos) < this.MOVE_THRESHOLD) return;
         
         const tile = this.getTileAtPosition(touchPos);
-        if (tile && tile !== this.selectedTile) {
+        if (tile && tile !== this.selectedTile && tile.type != -1) {
             if(this.exchangeTile && this.exchangeTile != tile) return;
             if (this.isAdjacent(this.selectedTile, tile)) {
                 this.swapTiles(this.selectedTile, tile);
@@ -138,93 +141,127 @@ export class Game extends Component {
         this.selectedTile = tile2;
         this.exchangeTile = tile1;
 
+        [this.board[tile1.row][tile1.col], this.board[tile2.row][tile2.col]] = [this.board[tile2.row][tile2.col], this.board[tile1.row][tile1.col]]
+
         // 检查是否有可消除的组合
         const matches = this.findMatches();
         if (matches.length > 0) {
             // 有可消除的组合
-            const { type, row, col } = tile1;
-            tile1.init(tile2.type, tile2.row, tile2.col);
-            tile2.init(type, row, col);
-
-            // await this.eliminateMatches(matches);
+            tile1.updateType(this.board[tile1.row][tile1.col]);
+            tile2.updateType(this.board[tile2.row][tile2.col]);
+            await this.eliminateMatches(matches);
             // await this.dropTiles();
             // await this.fillEmptySpaces();
         } else {
             // 没有可消除的组合，交换回来
-
+            [this.board[tile1.row][tile1.col], this.board[tile2.row][tile2.col]] = [this.board[tile2.row][tile2.col], this.board[tile1.row][tile1.col]];
         }
 
         this.isSwapping = false;
     }
 
     private findMatches(): { row: number, col: number }[] {
+//         if(this.selectedTile.type == this.exchangeTile.type) {
+//             // 待匹配的行列
+
+//         }
+//         else  {
+// // 
+//         }
+        const preMatchArr: { row: number, col: number }[] = [];
+        const hadMatchedArr: { row: number, col: number }[] = [];
+        const matchedRowsHash: Map<number, number[]> = new Map();
+        const matchedColsHash: Map<number, number[]> = new Map();
+        [this.selectedTile, this.exchangeTile].forEach(t => preMatchArr.push({ row: t.row, col: t.col }));
+
+        while (preMatchArr.length > 0) {
+            const tile = preMatchArr.shift();
+            if(hadMatchedArr.find(t => t.row == tile.row && t.col == tile.col)) continue;
+            const cols = this.matchCol(tile, matchedColsHash);
+            const rows = this.matchRow(tile, matchedRowsHash);
+            if (cols || rows) {
+                hadMatchedArr.push({ row: tile.row, col: tile.col });
+                cols && cols.forEach(c => preMatchArr.push(c));
+                rows && rows.forEach(r => preMatchArr.push(r));
+            }
+        }
+        return hadMatchedArr;
+    }
+
+    private matchCol(tile: { row: number, col: number }, matchedColsHash: Map<number, number[]>) {
+        const tileRow = tile.row;
+        const tileCol = tile.col;
+        const tileType = this.board[tileRow][tileCol];
+        
+        let upCount = 0;
+        let temp = tile.row;
+        while(temp > 0 && this.board[temp - 1][tileCol] == tileType) {
+            upCount++;
+            temp--;
+        }
+        let downCount = 0;
+        temp = tile.row;
+        while(temp < this.rows - 1 && this.board[temp + 1][tileCol] == tileType) {
+            downCount++;
+            temp++;
+        }
+        if(upCount + downCount + 1 < 3) return;
         const matches: { row: number, col: number }[] = [];
-        const rowsToCheck = new Set<number>();
-        const colsToCheck = new Set<number>();
-
-        // 只检查交换的元素所在的行和列
-        if (this.selectedTile && this.exchangeTile) {
-            rowsToCheck.add(this.selectedTile.row);
-            rowsToCheck.add(this.exchangeTile.row);
-            colsToCheck.add(this.selectedTile.col);
-            colsToCheck.add(this.exchangeTile.col);
+        while(upCount > 0) {
+            const newRow = tileRow - upCount--;
+            matches.push({ row: newRow, col: tileCol });
         }
-
-        // 检查指定行的水平匹配
-        for (const row of rowsToCheck) {
-            // 获取交换tile所在的列
-            const swapCols = Array.from(colsToCheck);
-            // 向左检查
-            let leftCount = 0;
-            let col = Math.min(...swapCols);
-            while (col > 0 && this.tileNodes[row][col - 1].type === this.tileNodes[row][col].type) {
-                leftCount++;
-                col--;
-            }
-            // 向右检查
-            let rightCount = 0;
-            col = Math.max(...swapCols);
-            while (col < this.columns - 1 && this.tileNodes[row][col + 1].type === this.tileNodes[row][col].type) {
-                rightCount++;
-                col++;
-            }
-            // 如果包含交换的tile的连续数量大于等于3，则添加到匹配列表
-            const totalCount = leftCount + rightCount + 1;
-            if (totalCount >= 3) {
-                const startCol = Math.min(...swapCols) - leftCount;
-                for (let i = 0; i < totalCount; i++) {
-                    matches.push({ row, col: startCol + i });
-                }
-            }
+        while(downCount > 0) {
+            const newRow = tileRow + downCount--;
+            matches.push({ row: newRow, col: tileCol });
         }
+        matches.forEach(m => {
+            if(matchedColsHash.has(m.col) && !matchedColsHash.get(m.col).includes(m.row)) {
+                matchedColsHash.get(m.col).push(m.row);
+            }
+            else {
+                matchedColsHash.set(m.col, [m.row]);
+            }
+        })
+        return matches;
+    }
 
-        // 检查指定列的垂直匹配
-        for (const col of colsToCheck) {
-            // 获取交换tile所在的行
-            const swapRows = Array.from(rowsToCheck);
-            // 向上检查
-            let upCount = 0;
-            let row = Math.min(...swapRows);
-            while (row > 0 && this.tileNodes[row - 1][col].type === this.tileNodes[row][col].type) {
-                upCount++;
-                row--;
-            }
-            // 向下检查
-            let downCount = 0;
-            row = Math.max(...swapRows);
-            while (row < this.rows - 1 && this.tileNodes[row + 1][col].type === this.tileNodes[row][col].type) {
-                downCount++;
-                row++;
-            }
-            // 如果包含交换的tile的连续数量大于等于3，则添加到匹配列表
-            const totalCount = upCount + downCount + 1;
-            if (totalCount >= 3) {
-                const startRow = Math.min(...swapRows) - upCount;
-                for (let i = 0; i < totalCount; i++) {
-                    matches.push({ row: startRow + i, col });
-                }
-            }
+    private matchRow(tile: { row: number, col: number }, matchedRowsHash: Map<number, number[]>) {
+        const tileRow = tile.row;
+        const tileCol = tile.col;
+        const tileType = this.board[tileRow][tileCol];
+
+        let leftCount = 0;
+        let temp = tile.col;
+        while(temp > 0 && this.board[tileRow][temp - 1] == tileType) {
+            leftCount++;
+            temp--;
         }
+        let rightCount = 0;
+        temp = tile.col;
+        while(temp < this.columns - 1 && this.board[tileRow][temp + 1] == tileType) {
+            rightCount++;
+            temp++;
+        }
+        
+        if(leftCount + rightCount + 1 < 3) return;
+        const matches: { row: number, col: number }[] = [];
+        while(leftCount > 0) {
+            const newCol = tileCol - leftCount--;
+            matches.push({ row: tileRow, col: newCol });
+        }
+        while(rightCount > 0) {
+            const newCol = tileCol + rightCount--;
+            matches.push({ row: tileRow, col: newCol });
+        }
+        matches.forEach(m => {
+            if(matchedRowsHash.has(m.row) && !matchedRowsHash.get(m.row).includes(m.col)) {
+                matchedRowsHash.get(m.row).push(m.col);
+            }
+            else {
+                matchedRowsHash.set(m.row, [m.col]);
+            }
+        })
         return matches;
     }
 
@@ -296,17 +333,18 @@ export class Game extends Component {
 
     //     return matches;
     // }
-    // private async eliminateMatches(matches: { row: number, col: number }[]) {
-    //     // 将匹配的位置标记为-1
-    //     for (const match of matches) {
-    //         this.tileNodes[match.row][match.col].type = -1;
-    //         // 可以在这里添加消除动画效果
-    //         this.tileNodes[match.row][match.col].node.active = false;
-    //     }
+    private async eliminateMatches(matches: { row: number, col: number }[]) {
+        // 将匹配的位置标记为-1
+        for (const match of matches) {
+            this.board[match.row][match.col] = -1;
+            this.tileNodes[match.row][match.col].type = -1;
+            // 可以在这里添加消除动画效果
+            this.tileNodes[match.row][match.col].node.active = false;
+        }
         
-    //     // 等待动画完成
-    //     await new Promise(resolve => setTimeout(resolve, 200));
-    // }
+        // 等待动画完成
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
 
     // private async dropTiles() {
     //     let dropped = false;
