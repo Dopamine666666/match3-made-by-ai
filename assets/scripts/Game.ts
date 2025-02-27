@@ -147,6 +147,8 @@ export class Game extends Component {
         const matches = this.findMatches();
         if (matches.length > 0) {
             // 有可消除的组合
+            console.log(tile1.type, tile2.type);
+            console.log(JSON.stringify(matches.map(m => this.board[m.row][m.col])));
             tile1.updateType(this.board[tile1.row][tile1.col]);
             tile2.updateType(this.board[tile2.row][tile2.col]);
             await this.eliminateMatches(matches);
@@ -168,27 +170,43 @@ export class Game extends Component {
 //         else  {
 // // 
 //         }
+        // 待匹配tile
         const preMatchArr: { row: number, col: number }[] = [];
+        // 已匹配且可消除tile
         const hadMatchedArr: { row: number, col: number }[] = [];
-        const matchedRowsHash: Map<number, number[]> = new Map();
-        const matchedColsHash: Map<number, number[]> = new Map();
+
+        // 记录type1类型对col进行过的row方向上的匹配
+        const type1matchedRowsHash: Map<number, number[]> = new Map();
+        // 记录type1类型对row进行过的col方向上的匹配
+        const type1matchedColsHash: Map<number, number[]> = new Map();
+        // 记录type2类型对col进行过的row方向上的匹配
+        const type2matchedRowsHash: Map<number, number[]> = new Map();
+        // 记录type2类型对row进行过的col方向上的匹配
+        const type2matchedColsHash: Map<number, number[]> = new Map();
         [this.selectedTile, this.exchangeTile].forEach(t => preMatchArr.push({ row: t.row, col: t.col }));
 
         while (preMatchArr.length > 0) {
             const tile = preMatchArr.shift();
-            if(hadMatchedArr.find(t => t.row == tile.row && t.col == tile.col)) continue;
-            const cols = this.matchCol(tile, matchedColsHash);
-            const rows = this.matchRow(tile, matchedRowsHash);
+            let matchedColsHash = this.board[tile.row][tile.col] == this.exchangeTile.type ? type1matchedColsHash : type2matchedColsHash;
+            let matchedRowsHash = this.board[tile.row][tile.col] == this.exchangeTile.type ? type1matchedRowsHash : type2matchedRowsHash;
+            const cols = matchedColsHash.has(tile.row) && matchedColsHash.get(tile.row).includes(tile.col) ? null : this.matchCol(tile, matchedColsHash);
+            const rows = matchedRowsHash.has(tile.col) && matchedRowsHash.get(tile.col).includes(tile.row) ? null : this.matchRow(tile, matchedRowsHash);
             if (cols || rows) {
                 hadMatchedArr.push({ row: tile.row, col: tile.col });
-                cols && cols.forEach(c => preMatchArr.push(c));
-                rows && rows.forEach(r => preMatchArr.push(r));
+                cols && cols.forEach(c => {
+                    preMatchArr.push(c);
+                    hadMatchedArr.push({ row: c.row, col: c.col });
+                });
+                rows && rows.forEach(r => {
+                    preMatchArr.push(r);
+                    hadMatchedArr.push({ row: r.row, col: r.col });
+                });
             }
         }
         return hadMatchedArr;
     }
-
-    private matchCol(tile: { row: number, col: number }, matchedColsHash: Map<number, number[]>) {
+    // 对tile所在col，进行row方向上的匹配
+    private matchRow(tile: { row: number, col: number }, matchedRowsHash: Map<number, number[]>) {
         const tileRow = tile.row;
         const tileCol = tile.col;
         const tileType = this.board[tileRow][tileCol];
@@ -216,17 +234,17 @@ export class Game extends Component {
             matches.push({ row: newRow, col: tileCol });
         }
         matches.forEach(m => {
-            if(matchedColsHash.has(m.col) && !matchedColsHash.get(m.col).includes(m.row)) {
-                matchedColsHash.get(m.col).push(m.row);
+            if(matchedRowsHash.has(m.col) && !matchedRowsHash.get(m.col).includes(m.row)) {
+                matchedRowsHash.get(m.col).push(m.row);
             }
             else {
-                matchedColsHash.set(m.col, [m.row]);
+                matchedRowsHash.set(m.col, [m.row]);
             }
         })
         return matches;
     }
-
-    private matchRow(tile: { row: number, col: number }, matchedRowsHash: Map<number, number[]>) {
+    // 对tile所在row，进行col方向上的匹配
+    private matchCol(tile: { row: number, col: number }, matchedColsHash: Map<number, number[]>) {
         const tileRow = tile.row;
         const tileCol = tile.col;
         const tileType = this.board[tileRow][tileCol];
@@ -255,11 +273,11 @@ export class Game extends Component {
             matches.push({ row: tileRow, col: newCol });
         }
         matches.forEach(m => {
-            if(matchedRowsHash.has(m.row) && !matchedRowsHash.get(m.row).includes(m.col)) {
-                matchedRowsHash.get(m.row).push(m.col);
+            if(matchedColsHash.has(m.row) && !matchedColsHash.get(m.row).includes(m.col)) {
+                matchedColsHash.get(m.row).push(m.col);
             }
             else {
-                matchedRowsHash.set(m.row, [m.col]);
+                matchedColsHash.set(m.row, [m.col]);
             }
         })
         return matches;
