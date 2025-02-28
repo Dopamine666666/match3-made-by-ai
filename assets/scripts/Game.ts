@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, Prefab, UITransform, instantiate, Vec2, EventTouch, Vec3, color } from 'cc';
+import { _decorator, Component, Node, Prefab, UITransform, instantiate, Vec2, EventTouch, Vec3, tween } from 'cc';
 import { Tile } from './Tile';
 const { ccclass, property } = _decorator;
 
@@ -58,20 +58,28 @@ export class Game extends Component {
             this.board[i] = [];
             this.tileNodes[i] = [];
             for (let j = 0; j < this.columns; j++) {
-                const type = Math.floor(Math.random() * this.tileTypes);
+                let type: number;
+                do {
+                    type = Math.floor(Math.random() * this.tileTypes);
+                }
+                while (this.isInitialMatch(i, j, type));
+
                 const node = instantiate(this.tilePrefab);
                 node.parent = this.tileLayer;
-                // 修改 y 坐标的计算，使其与行号相反
-                node.position.set(
-                    (j - this.columns/2 + 0.5) * this.tileSize,
-                    ((this.rows - i - 1) - this.rows/2 + 0.5) * this.tileSize,
-                    0
-                );
+                node.setPosition((j - this.columns/2 + 0.5) * this.tileSize, ((this.rows - i - 1) - this.rows/2 + 0.5) * this.tileSize, 0);
                 this.board[i].push(type);
                 this.tileNodes[i].push(node.getComponent(Tile));
                 node.getComponent(Tile).init(type, i, j);
             }
         }
+    }
+
+    private isInitialMatch(row: number, col: number, type: number) {
+        // check col
+        if(col >= 2 && this.board[row][col - 1] == type && this.board[row][col - 2] == type) return true;
+        // check row
+        if(row >= 2 && this.board[row - 1][col] == type && this.board[row - 2][col] == type) return true;
+        return false;
     }
 
     private setupTouchEvents() {
@@ -113,6 +121,7 @@ export class Game extends Component {
     }
 
     private onTouchEnd(event: EventTouch) {
+        if(this.isSwapping) return;
         this.selectedTile = null;
         this.exchangeTile = null;
     }
@@ -141,21 +150,65 @@ export class Game extends Component {
         this.selectedTile = tile2;
         this.exchangeTile = tile1;
 
-        [this.board[tile1.row][tile1.col], this.board[tile2.row][tile2.col]] = [this.board[tile2.row][tile2.col], this.board[tile1.row][tile1.col]]
+        const pos1 = tile1.node.position.clone();
+        const pos2 = tile2.node.position.clone();
 
+        await Promise.all([
+            new Promise(resolve => {
+                tween(tile1.node)
+                .to(0.2, { position: pos2 })
+                .call(resolve)
+                .start();
+            }),
+            new Promise(resolve => {
+                tween(tile2.node)
+                .to(0.2, { position: pos1 })
+                .call(resolve)
+                .start();
+            })
+        ]);
+        // 交换数据层tile类型
+        [this.board[tile1.row][tile1.col], this.board[tile2.row][tile2.col]] = [this.board[tile2.row][tile2.col], this.board[tile1.row][tile1.col]];
+ 
         // 检查是否有可消除的组合
         const matches = this.findMatches();
         if (matches.length > 0) {
             // 有可消除的组合
             console.log(tile1.type, tile2.type);
+            // console.log(tile1.type, tile1.row, tile1.col, tile2.type, tile2.row, tile2.col);
             console.log(JSON.stringify(matches.map(m => this.board[m.row][m.col])));
-            tile1.updateType(this.board[tile1.row][tile1.col]);
-            tile2.updateType(this.board[tile2.row][tile2.col]);
+
+            [this.tileNodes[tile1.row][tile1.col], this.tileNodes[tile2.row][tile2.col]] = [this.tileNodes[tile2.row][tile2.col], this.tileNodes[tile1.row][tile1.col]];
+            const tempRow = tile1.row;
+            const tempCol = tile1.col;
+            tile1.row = tile2.row;
+            tile1.col = tile2.col;
+            tile2.row = tempRow;
+            tile2.col = tempCol;
+
+            tile1.type = this.board[tile1.row][tile1.col];
+            tile2.type = this.board[tile2.row][tile2.col];
+            
+            console.log(tile1.type, tile1.row, tile1.col, tile2.type, tile2.row, tile2.col);
             await this.eliminateMatches(matches);
             // await this.dropTiles();
             // await this.fillEmptySpaces();
         } else {
             // 没有可消除的组合，交换回来
+            await Promise.all([
+                new Promise(resolve => {
+                    tween(tile1.node)
+                    .to(0.2, { position: pos1 })
+                    .call(resolve)
+                    .start();
+                }),
+                new Promise(resolve => {
+                    tween(tile2.node)
+                    .to(0.2, { position: pos2 })
+                    .call(resolve)
+                    .start();
+                })
+            ]);
             [this.board[tile1.row][tile1.col], this.board[tile2.row][tile2.col]] = [this.board[tile2.row][tile2.col], this.board[tile1.row][tile1.col]];
         }
 
