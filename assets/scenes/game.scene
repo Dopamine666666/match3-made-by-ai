@@ -547,13 +547,15 @@
     "effectLayer": {
       "__id__": 11
     },
-    "rows": 8,
-    "columns": 8,
+    "gameLayer": null,
     "tilePrefab": {
       "__uuid__": "556d01d6-73de-4935-a298-6927f75ae5e5",
       "__expectedType__": "cc.Prefab"
     },
-    "tileTypes": 5,
+    "rows": 8,
+    "columns": 8,
+    "typeCount": 5,
+    "tileSize": 80,
     "_id": "24wx912eRJxa0ecpCzyimb"
   },
   {
