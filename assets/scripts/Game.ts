@@ -112,6 +112,7 @@ export class Game extends Component {
     }
 
     private onTileClick(tile: Tile) {
+        console.log(tile.type);
         if(tile.type === 0) return;
         if (!this.selectedTile) {
             // 第一次选中
@@ -156,7 +157,7 @@ export class Game extends Component {
 
     private async checkMatches(tile1: Tile, tile2: Tile): Promise<Tile[]> {
         const matches: Set<Tile> = new Set();
-        const tilesToCheck = [tile1, tile2];
+        const tilesToCheck = tile1 == tile2 ? [tile1] : [tile1, tile2];
         
         for (const tile of tilesToCheck) {
             // 检查水平方向
@@ -228,6 +229,7 @@ export class Game extends Component {
         });
 
         await Promise.all(promises);
+        await this.handleFalling();
     }
 
     private async swapTiles(tile1: Tile, tile2: Tile) {
@@ -262,15 +264,90 @@ export class Game extends Component {
             this.tileNodes[tile1.row][tile1.col] = tile2;
             this.tileNodes[tile2.row][tile2.col] = tile1;
             
+            tile2.row = tile1.row;
+            tile2.col = tile1.col;
             tile1.row = tempRow;
             tile1.col = tempCol;
-            tile2.row = tile2.row;
-            tile2.col = tile2.col;
             
             await Promise.all([
                 tile1.moveTo(pos1),
                 tile2.moveTo(pos2)
             ]);
+        }
+    }
+
+    private async handleFalling() {
+        let hasChanges = false;
+        const columnPromises: Promise<void>[] = [];
+        for(let col = 0; col < this.columns; col++) {
+            // const columnPromises: Promise<void>[] = [];
+
+            for(let row = this.rows - 1; row >= 0; row--) {
+                if(this.tileNodes[row][col].type == 0) {
+                    let sourceRow = row - 1;
+                    while(sourceRow >= 0) {
+                        if(this.tileNodes[sourceRow][col].type != 0) {
+                            const targetTile = this.tileNodes[row][col];
+                            const sourceTile = this.tileNodes[sourceRow][col];
+
+                            this.tileNodes[row][col] = sourceTile;
+                            this.tileNodes[sourceRow][col] = targetTile;
+
+                            sourceTile.row = row;
+                            targetTile.row = sourceRow;
+
+                            const targetPos = this.getTilePosition(row, col);
+                            columnPromises.push(sourceTile.moveTo(targetPos));
+                            hasChanges = true;
+                            break;
+                        }
+                        sourceRow--;
+                    }
+
+                    if(sourceRow < 0) {
+                        const tile = this.tileNodes[row][col];
+                        const startPos = this.getTilePosition(-1, col);
+                        tile.node.setPosition(startPos);
+                        tile.node.active = true;
+
+                        let newType: number;
+                        do {
+                            newType = Math.floor(Math.random() * this.typeCount) + 1;
+                        } 
+                        while(this.wouldCauseMatch(row, col, newType));
+
+                        tile.type = newType;
+                        tile.init(newType, row, col);
+
+                        const targetPos = this.getTilePosition(row, col);
+                        columnPromises.push(tile.moveTo(targetPos));
+                        hasChanges = true;
+                    }
+                }
+            }
+
+            // await Promise.all(columnPromises);
+        }
+
+        await Promise.all(columnPromises);
+
+        if(hasChanges) {
+            const allMatches: Tile[] = [];
+
+            for(let row = 0; row < this.rows; row++) {
+                for(let col = 0; col < this.columns; col++) {
+                    const matches = await this.checkMatches(this.tileNodes[row][col], this.tileNodes[row][col]);
+                    matches.forEach(tile => {
+                        if(!allMatches.includes(tile)) {
+                            allMatches.push(tile);
+                        }
+                    })
+                }
+            }
+
+            if(allMatches.length > 0) {
+                await this.eliminateMatches(allMatches);
+            }
         }
     }
 }

@@ -17,11 +17,11 @@ export class Tile extends Component {
         this.node.getComponentInChildren(Sprite).spriteFrame = this.spfs[type - 1];
     }
     
-    moveTo(pos: Vec3) {
+    moveTo(pos: Vec3): Promise<void> {
         return new Promise((resolve) => {
             tween(this.node)
             .to(0.2, { position: pos })
-            .call(resolve)
+            .call(() => resolve())
             .start();
         })
     }
